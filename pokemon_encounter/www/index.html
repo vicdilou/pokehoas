@@ -672,6 +672,8 @@ async function loadStrings(lang) {
     const sn = await fetch(BASE + '/api/species-names/' + encodeURIComponent(LANG)).then(r => r.json());
     NAME_TABLES = await fetch(BASE + '/api/name-tables/' + encodeURIComponent(LANG)).then(r => r.json())
       .catch(() => ({ abilities: {}, moves: {}, types: {} }));
+    ABILITY_DESCRIPTIONS = await fetch(BASE + '/api/ability-descriptions/' + encodeURIComponent(LANG))
+      .then(r => r.json()).catch(() => ({}));
     SPECIES_NAMES = sn.names || {};
     SPECIES_NAMES_BY_EN = sn.by_en || {};
   } catch (e) {
@@ -691,6 +693,7 @@ var SPECIES_NAMES = {};
 var SPECIES_NAMES_BY_EN = {};
 
 var NAME_TABLES = { abilities: {}, moves: {}, types: {} };
+var ABILITY_DESCRIPTIONS = {};
 
 function speciesName(sp) {
   if (!sp) return '?';
@@ -3485,7 +3488,7 @@ const statStagePills = stages => STAT_STAGE_ORDER
 // nicht funktionieren - zusaetzlich per Klick als kleines Fenster (openAbilityInfo).
 // Abilities without a battle effect carry `inactive` (why they do nothing here,
 // see abilities.describe) - shown below the description.
-const abilityDescription = info => pick(info, 'description') || tr('battle.ability_no_effect');
+const abilityDescription = info => (info && ABILITY_DESCRIPTIONS[info.key]) || pick(info, 'description') || tr('battle.ability_no_effect');
 const abilityInactiveNote = info => (info && info.inactive ? tr('ability.inactive.' + info.inactive) : '');
 const abilityPill = info => info
   ? `<span class="pill ability-pill" style="cursor:pointer" title="${esc([abilityDescription(info), abilityInactiveNote(info)].filter(Boolean).join('\n'))}">${esc(localizedName(info))}</span>`
