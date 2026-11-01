@@ -159,6 +159,15 @@ for path in sorted((ROOT / "pokemon_encounter" / "app" / "data" / "i18n").glob("
     check(f"{path.stem}.json ist alphabetisch sortiert", list(lang_strings) == sorted(lang_strings))
 
 
+# ------------------------------------------- Keine nativen Browser-Dialoge
+# alert/confirm/prompt koennen Browser bzw. HA-App-WebViews unterdruecken
+# (confirm() liefert dann still "nein"); die Oberflaeche nutzt uiAlert,
+# uiConfirm und uiPrompt mit uebersetzten Buttons.
+native_dialogs = re.findall(r"(?<![\w.])(?:alert|confirm|prompt)\(", html)
+check("index.html ruft keine nativen Dialoge auf", not native_dialogs, native_dialogs)
+check("Dialog-Buttons sind uebersetzt", {"common.ok", "common.cancel"} <= set(en_strings))
+
+
 # -------------------------------------------------------------------- Ende
 print()
 if failures:

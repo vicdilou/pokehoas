@@ -7,6 +7,7 @@ Aufruf:  python3 tests/test_balls.py
 from __future__ import annotations
 
 import json
+import re
 import os
 import random
 import sys
@@ -298,9 +299,13 @@ check("Der Waechter fragt zweimal nach",
       html.count("common.master_ball_confirm'") == 1
       and html.count("common.master_ball_confirm_again'") == 1)
 check("Wurf in der Warteschlange geht durch den Waechter",
-      "if (!confirmMasterBall(ball, card.dataset.name" in html)
+      "if (!await confirmMasterBall(ball, card.dataset.name" in html)
 check("Wurf im manuellen Kampf geht durch den Waechter",
-      "if (!confirmMasterBall(ball, w.name" in html)
+      "if (!await confirmMasterBall(ball, w.name" in html)
+# Der Waechter ist async (In-App-Dialog): ohne `await` waere das Promise immer
+# truthy und der Meisterball floege ohne Rueckfrage.
+check("Waechter-Aufrufe warten auf die Antwort",
+      len(re.findall(r"(?<!await )(?<!function )confirmMasterBall\(ball", html)) == 0)
 check("Der Waechter laesst andere Baelle durch",
       "if (ball !== MASTER_BALL) return true;" in html)
 

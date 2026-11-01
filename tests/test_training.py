@@ -25,7 +25,7 @@ os.environ["SUPERVISOR_TOKEN"] = "dummy"
 
 from fastapi import HTTPException  # noqa: E402
 
-from app import battle, db, moves, seed, spawn, trainer_battle, training  # noqa: E402
+from app import achievements, battle, db, moves, seed, spawn, trainer_battle, training  # noqa: E402
 from app.api import league  # noqa: E402
 
 failures: list[str] = []
@@ -63,6 +63,9 @@ def mark_level100(user_id: str, count: int) -> None:
     for n in range(count):
         db.execute("INSERT OR IGNORE INTO pokemon_level100 (user_id, owned_id, reached_at) "
                    "VALUES (?,?,?)", (user_id, 100000 + n, now))
+    # training.unlocked() follows the achievement flag (like achievements.share_all_exp),
+    # not the raw count - sync_level100 is what normally keeps the two in lockstep.
+    achievements.sync_level100(user_id)
 
 
 # ------------------------------------------------------------ Freischaltung

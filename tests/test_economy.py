@@ -196,6 +196,15 @@ check("Fehlkauf aendert nichts (Geld)", economy.balance("alice") == money_before
 check("Fehlkauf aendert nichts (Inventar)", db.query_one(
     "SELECT 1 AS x FROM inventory WHERE user_id='alice' AND item_key='fire_stone'") is None)
 
+expect_http("Menge ueber neuem Maximum (1000) abgelehnt", 400, shop_api.buy,
+            shop_api.PurchaseIn(item_key="poke_ball", quantity=1000), alice)
+economy.credit("alice", 200_000)
+before_balls_bulk = db.query_one(
+    "SELECT quantity FROM inventory WHERE user_id='alice' AND item_key='poke_ball'")["quantity"]
+bulk = shop_api.buy(shop_api.PurchaseIn(item_key="poke_ball", quantity=999), alice)
+check("Kauf von 999 Stueck (neues Maximum) erlaubt",
+      bulk["owned"] == before_balls_bulk + 999, str(bulk))
+
 db.set_setting("shop_price_multiplier", 0.5)
 check("Preis-Multiplikator wirkt",
       economy.unit_price(catalog["fire_stone"]) == catalog["fire_stone"]["price"] // 2)

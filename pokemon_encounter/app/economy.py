@@ -49,7 +49,7 @@ IV_LABELS = {
 }
 # Hard lock in addition to "buyable": false in catalog.
 NEVER_BUYABLE = {"master_ball"}
-MAX_PURCHASE_QUANTITY = 99
+MAX_PURCHASE_QUANTITY = 999
 
 _catalog: list[dict[str, Any]] | None = None
 

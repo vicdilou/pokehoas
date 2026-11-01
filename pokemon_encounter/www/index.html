@@ -425,6 +425,9 @@
   .eff-weak { color: var(--accent); }
   .eff-none { color: var(--muted); }
   .modal-backdrop.battle-modal { z-index: 55; }
+  /* uiAlert/uiConfirm/uiPrompt: above every other overlay, also the battle. */
+  #dialogOverlay { z-index: 60; align-items: center; }
+  .dialog-text { margin: 0; white-space: pre-line; }
   .bBall.boosted { border-color: var(--ok); }
   .bBall .boost { color: var(--ok); font-weight: 600; }
   .ach { display: flex; align-items: center; gap: 10px; }
@@ -539,6 +542,7 @@
 <div id="itemOverlay" class="modal-backdrop hidden"></div>
 <div id="enemyOverlay" class="modal-backdrop battle-modal hidden"></div>
 <div id="tradePickOverlay" class="modal-backdrop hidden"></div>
+<div id="dialogOverlay" class="modal-backdrop hidden"></div>
 <div id="profileOverlay" class="hidden"></div>
 <button id="battleResume" class="action hidden" data-i18n="header.resume_battle">Resume battle</button>
 
@@ -673,11 +677,56 @@ const genderLabel = g => g === 'male' ? tr('gender.male') : g === 'female' ? tr(
 // (economy.py NEVER_BUYABLE), so a mis-click is unrecoverable. Both throw paths
 // (queue card and manual battle) ask twice; false means the user backed out.
 const MASTER_BALL = 'master_ball';
-function confirmMasterBall(ball, name, count) {
+async function confirmMasterBall(ball, name, count) {
   if (ball !== MASTER_BALL) return true;
-  return confirm(tr('common.master_ball_confirm', { name, count }))
-      && confirm(tr('common.master_ball_confirm_again', { name }));
+  return await uiConfirm(tr('common.master_ball_confirm', { name, count }))
+      && await uiConfirm(tr('common.master_ball_confirm_again', { name }));
 }
+
+// In-app replacements for alert/confirm/prompt. Browsers ("don't let this site
+// prompt you again") and some HA companion app WebViews suppress native
+// dialogs; a native confirm then silently answers "no" and the button seems dead.
+// Dialogs are queued and shown one at a time.
+let dialogChain = Promise.resolve();
+function uiDialog(message, { cancel = false, input = null } = {}) {
+  const show = () => new Promise(resolve => {
+    const overlay = $('#dialogOverlay');
+    overlay.innerHTML = `<div class="move-detail" role="dialog" aria-modal="true">
+      <p class="dialog-text"></p>
+      ${input !== null ? '<input id="dialogInput" style="width:100%">' : ''}
+      <div class="row" style="justify-content:flex-end;gap:6px;margin-top:12px">
+        ${cancel ? `<button class="ghost action" id="dialogCancel">${tr('common.cancel')}</button>` : ''}
+        <button class="action" id="dialogOk">${tr('common.ok')}</button>
+      </div>
+    </div>`;
+    overlay.querySelector('.dialog-text').textContent = String(message ?? '');
+    const field = $('#dialogInput');
+    if (field) field.value = input;
+    const onKey = e => {
+      if (e.key !== 'Escape' && e.key !== 'Enter') return;
+      e.preventDefault(); e.stopPropagation();
+      finish(e.key === 'Enter');
+    };
+    const finish = ok => {
+      const value = field ? field.value : null;
+      document.removeEventListener('keydown', onKey, true);
+      overlay.classList.add('hidden'); overlay.innerHTML = '';
+      resolve(input !== null ? (ok ? value : null) : ok);
+    };
+    document.addEventListener('keydown', onKey, true);
+    $('#dialogOk').onclick = () => finish(true);
+    if (cancel) $('#dialogCancel').onclick = () => finish(false);
+    overlay.onclick = e => { if (e.target === overlay) finish(false); };
+    overlay.classList.remove('hidden');
+    (field || $('#dialogOk')).focus();
+  });
+  const result = dialogChain.then(show);
+  dialogChain = result.catch(() => {});
+  return result;
+}
+const uiAlert = message => uiDialog(message).then(() => {});
+const uiConfirm = message => uiDialog(message, { cancel: true });
+const uiPrompt = (message, value = '') => uiDialog(message, { cancel: true, input: value });
 
 let currentTab = 'queue';
 async function setLanguage(lang, opts) {
@@ -708,8 +757,8 @@ function refreshStatus() {
 $('#pollNow').onclick = async () => {
   $('#pollNow').disabled = true;
   try { const r = await api('/api/poll', { method: 'POST' }); await refreshStatus(); render('queue');
-        if (!r.created) alert(tr('queue.poll_nothing')); }
-  catch (e) { alert(e.message); }
+        if (!r.created) uiAlert(tr('queue.poll_nothing')); }
+  catch (e) { uiAlert(e.message); }
   finally { $('#pollNow').disabled = false; }
 };
 
@@ -816,7 +865,7 @@ async function renderQueue() {
     card.querySelector('.throw').onclick = async () => {
       try {
         const ball = card.querySelector('.ballPick').value;
-        if (!confirmMasterBall(ball, card.dataset.name, inv.items[ball] || 0)) return;
+        if (!await confirmMasterBall(ball, card.dataset.name, inv.items[ball] || 0)) return;
         const r = await api(`/api/encounters/${id}/throw`, {
           method: 'POST', body: JSON.stringify({ ball })
         });
@@ -1030,7 +1079,7 @@ function drawTriggerGroups(triggers, tcfg) {
         list.forEach(t => { t.enabled = enabled; });
         triggerView.open.add(key);
         drawTriggerGroups(triggers, tcfg); refreshStatus();
-      } catch (e) { alert(e.message); }
+      } catch (e) { uiAlert(e.message); }
     };
     details.querySelector('.gEnable').onclick = () => bulk(true);
     details.querySelector('.gDisable').onclick = () => bulk(false);
@@ -1047,7 +1096,7 @@ function drawTriggerGroups(triggers, tcfg) {
           });
           t.enabled = e.target.checked; updateCount(); refreshStatus();
           out.textContent = t.enabled ? tr('triggers.enabled') : tr('triggers.disabled');
-        } catch (err) { e.target.checked = !e.target.checked; alert(err.message); }
+        } catch (err) { e.target.checked = !e.target.checked; uiAlert(err.message); }
       };
       card.querySelector('.tSave').onclick = async () => {
         try {
@@ -1066,7 +1115,7 @@ function drawTriggerGroups(triggers, tcfg) {
           Object.assign(t, payload, { friendly_name: t.friendly_name });
           updateCount(); refreshStatus();
           out.textContent = tr('common.saved');
-        } catch (e) { alert(e.message); }
+        } catch (e) { uiAlert(e.message); }
       };
       card.querySelector('.tFire').onclick = async () => {
         try {
@@ -1082,7 +1131,7 @@ function drawTriggerGroups(triggers, tcfg) {
         try {
           await api('/api/triggers/' + encodeURIComponent(entityId), { method: 'DELETE' });
           render('triggers'); refreshStatus();
-        } catch (e) { alert(e.message); }
+        } catch (e) { uiAlert(e.message); }
       };
     });
   });
@@ -1362,48 +1411,48 @@ async function renderGeneralSettings(me) {
   </div>`;
   wireRegionLockSelect('regionLockPick', async mode => {
     try { await api('/api/users/me/region-lock', { method: 'PUT', body: JSON.stringify({ region_lock: mode }) }); }
-    catch (e) { alert(e.message); renderGeneralSettings(); }
+    catch (e) { uiAlert(e.message); renderGeneralSettings(); }
   });
   wireRegionLockSelect('battleStylePick', async style => {
     try { await api('/api/users/me/battle-style', { method: 'PUT', body: JSON.stringify({ battle_style: style }) }); }
-    catch (e) { alert(e.message); renderGeneralSettings(); }
+    catch (e) { uiAlert(e.message); renderGeneralSettings(); }
   }, 'battle_style.desc.');
   wireRegionLockSelect('gymDifficultyPick', async mode => {
     try { await api('/api/users/me/gym-difficulty', { method: 'PUT', body: JSON.stringify({ gym_difficulty: mode }) }); }
-    catch (e) { alert(e.message); renderGeneralSettings(); }
+    catch (e) { uiAlert(e.message); renderGeneralSettings(); }
   }, 'gym_difficulty.desc.');
   wireRegionLockSelect('animationSpeedPick', async speed => {
     try {
       await api('/api/users/me/animation-speed', { method: 'PUT', body: JSON.stringify({ animation_speed: speed }) });
       applyAnimationSpeed(speed);
-    } catch (e) { alert(e.message); renderGeneralSettings(); }
+    } catch (e) { uiAlert(e.message); renderGeneralSettings(); }
   }, 'animation_speed.desc.');
   const saveAutoHeal = async body => {
     try { await api('/api/users/me/auto-heal', { method: 'PUT', body: JSON.stringify(body) }); }
-    catch (e) { alert(e.message); }
+    catch (e) { uiAlert(e.message); }
     renderGeneralSettings();
   };
   $('#autoHealPick').onchange = e => saveAutoHeal({ auto_heal: e.target.checked });
   $('#autoBuyPick').onchange = e => saveAutoHeal({ auto_buy_potions: e.target.checked });
   $('#showTeamIvsPick').onchange = async e => {
     try { await api('/api/users/me/show-team-ivs', { method: 'PUT', body: JSON.stringify({ show_team_ivs: e.target.checked }) }); }
-    catch (err) { alert(err.message); renderGeneralSettings(); }
+    catch (err) { uiAlert(err.message); renderGeneralSettings(); }
   };
   $('#boxItemReturnPick').onchange = async e => {
     try { await api('/api/users/me/box-item-return', { method: 'PUT', body: JSON.stringify({ box_item_return: e.target.checked }) }); }
-    catch (err) { alert(err.message); renderGeneralSettings(); }
+    catch (err) { uiAlert(err.message); renderGeneralSettings(); }
   };
   $('#autoLockFirstCatchPick').onchange = async e => {
     try { await api('/api/users/me/auto-lock-first-catch', { method: 'PUT', body: JSON.stringify({ auto_lock_first_catch: e.target.checked }) }); }
-    catch (err) { alert(err.message); renderGeneralSettings(); }
+    catch (err) { uiAlert(err.message); renderGeneralSettings(); }
   };
   $('#autoLockShinyPick').onchange = async e => {
     try { await api('/api/users/me/auto-lock-shiny', { method: 'PUT', body: JSON.stringify({ auto_lock_shiny: e.target.checked }) }); }
-    catch (err) { alert(err.message); renderGeneralSettings(); }
+    catch (err) { uiAlert(err.message); renderGeneralSettings(); }
   };
   $('#autoLockLivingDexPick').onchange = async e => {
     try { await api('/api/users/me/auto-lock-living-dex', { method: 'PUT', body: JSON.stringify({ auto_lock_living_dex: e.target.checked }) }); }
-    catch (err) { alert(err.message); renderGeneralSettings(); }
+    catch (err) { uiAlert(err.message); renderGeneralSettings(); }
   };
 }
 
@@ -1714,7 +1763,7 @@ async function renderAutoRules() {
 
   const saveSettings = async body => {
     try { await api('/api/auto-rules/settings', { method: 'PUT', body: JSON.stringify(body) }); }
-    catch (e) { alert(e.message); }
+    catch (e) { uiAlert(e.message); }
     renderAutoRules();
   };
   $('#arEnabled').onchange = e => saveSettings({ enabled: e.target.checked });
@@ -1737,7 +1786,7 @@ async function renderAutoRules() {
   el.querySelectorAll('.arTemplate').forEach(btn => {
     btn.onclick = async () => {
       try { await api(`/api/auto-rules/templates/${encodeURIComponent(btn.dataset.key)}`, { method: 'POST' }); }
-      catch (e) { alert(e.message); }
+      catch (e) { uiAlert(e.message); }
       renderAutoRules();
     };
   });
@@ -1747,7 +1796,7 @@ async function renderAutoRules() {
     const rule = ruleById(id);
     card.querySelector('.arToggle').onchange = async e => {
       try { await api(`/api/auto-rules/${id}`, { method: 'PUT', body: JSON.stringify({ ...rule, id: undefined, position: undefined, enabled: e.target.checked }) }); }
-      catch (err) { alert(err.message); }
+      catch (err) { uiAlert(err.message); }
       renderAutoRules();
     };
     card.querySelectorAll('.arMove').forEach(btn => {
@@ -1756,15 +1805,15 @@ async function renderAutoRules() {
         const i = ids.indexOf(id), j = i + Number(btn.dataset.dir);
         [ids[i], ids[j]] = [ids[j], ids[i]];
         try { await api('/api/auto-rules/order', { method: 'PUT', body: JSON.stringify({ ids }) }); }
-        catch (e) { alert(e.message); }
+        catch (e) { uiAlert(e.message); }
         renderAutoRules();
       };
     });
     card.querySelector('.arEdit').onclick = () => openEditor(id, rule);
     card.querySelector('.arDelete').onclick = async () => {
-      if (!confirm(tr('auto_rules.delete_confirm', { name: rule.name }))) return;
+      if (!await uiConfirm(tr('auto_rules.delete_confirm', { name: rule.name }))) return;
       try { await api(`/api/auto-rules/${id}`, { method: 'DELETE' }); }
-      catch (e) { alert(e.message); }
+      catch (e) { uiAlert(e.message); }
       if (autoRulesView.editing === id) autoRulesView.editing = null;
       renderAutoRules();
     };
@@ -1793,7 +1842,7 @@ async function renderAutoRules() {
   }
   $('#arPreview').onclick = async () => {
     try { autoRulesView.preview = (await api('/api/auto-rules/preview')).encounters; }
-    catch (e) { alert(e.message); return; }
+    catch (e) { uiAlert(e.message); return; }
     $('#arPreviewOut').innerHTML = arPreviewHtml();
   };
 }
@@ -2116,20 +2165,20 @@ async function admRenderGameSettings(box) {
     </div>`).join('');
 
   const known = Object.fromEntries(groups.flatMap(g => g.settings.map(s => [s.key, s])));
-  const fail = e => alert(e.message);
+  const fail = e => uiAlert(e.message);
 
   $('#admSettingsSave').onclick = async () => {
     const payload = {};
     for (const input of box.querySelectorAll('input[data-key]')) {
       const s = known[input.dataset.key];
       const value = input.type === 'checkbox' ? input.checked : input.value === '' ? null : Number(input.value);
-      if (value === null || Number.isNaN(value)) { alert(tr('admin.settings_invalid_number', { label: labelOf(s.key) })); return; }
+      if (value === null || Number.isNaN(value)) { uiAlert(tr('admin.settings_invalid_number', { label: labelOf(s.key) })); return; }
       if (value !== s.value) payload[s.key] = value;
     }
-    if (!Object.keys(payload).length) { alert(tr('admin.settings_nothing_changed')); return; }
+    if (!Object.keys(payload).length) { uiAlert(tr('admin.settings_nothing_changed')); return; }
     try {
       await admApi('/api/settings', admSend('PATCH', payload));
-      alert(tr('settings.saved_alert'));
+      uiAlert(tr('settings.saved_alert'));
       admRenderGameSettings(box);
     } catch (e) { fail(e); }
   };
@@ -2137,7 +2186,7 @@ async function admRenderGameSettings(box) {
   const reset = async group => {
     const msg = group ? tr('admin.settings_reset_group_confirm', { group: tr('admin.settings_group.' + group) })
       : tr('admin.settings_reset_all_confirm');
-    if (!confirm(msg)) return;
+    if (!await uiConfirm(msg)) return;
     try {
       await admApi('/api/admin/settings/reset', admSend('POST', { group }));
       admRenderGameSettings(box);
@@ -2268,7 +2317,7 @@ function admDrawUser(box) {
      dex: admSectionDex, achievements: admSectionAchievements, raw: admSectionRaw }[adminState.section])(section, d);
 }
 
-const admFail = e => alert(e.message);
+const admFail = e => uiAlert(e.message);
 const admFieldLabel = key => tr('admin.field.' + key);
 
 function admSectionAccount(box, d) {
@@ -2335,7 +2384,7 @@ function admSectionAccount(box, d) {
     const msg = keep
       ? tr('admin.reset_starter_keep_confirm', { who, count: partyCount })
       : tr('admin.reset_starter_wipe_confirm', { who, count: d.pokemon.length });
-    if (!confirm(msg)) return;
+    if (!await uiConfirm(msg)) return;
     try {
       await admApi(admUserUrl(userId) + '/reset-starter', admSend('POST', { keep_pokemon: keep }));
       admRenderUser();
@@ -2344,13 +2393,13 @@ function admSectionAccount(box, d) {
 
   box.querySelector('#admWipe').onclick = async () => {
     const deleteUser = box.querySelector('#admDeleteUser').checked;
-    const typed = prompt(
+    const typed = await uiPrompt(
       tr('admin.wipe_confirm', { who, count: d.pokemon.length }) +
       (resetFields.length ? tr('admin.wipe_confirm_fields', { fields: resetFields.map(([k]) => admFieldLabel(k)).join(', ') }) : '') + '.' +
       (deleteUser ? ' ' + tr('admin.wipe_confirm_delete_user') : '') +
       '\n\n' + tr('admin.wipe_confirm_type_name', { name: u.name }));
     if (typed === null) return;
-    if (typed.trim() !== u.name) { alert(tr('admin.name_mismatch')); return; }
+    if (typed.trim() !== u.name) { uiAlert(tr('admin.name_mismatch')); return; }
     try {
       await admApi(admUserUrl(userId) + '/data?delete_user=' + (deleteUser ? 'true' : 'false'),
         { method: 'DELETE' });
@@ -2555,7 +2604,7 @@ async function admSectionDex(box, d) {
   box.querySelector('#admDexBulk').onclick = async () => {
     const gen = box.querySelector('#admDexBulkGen').value, state = box.querySelector('#admDexBulkState').value;
     const scope = gen ? tr('admin.generation', { gen }) : tr('admin.dex_all_generations');
-    if (!confirm(tr('admin.dex_bulk_confirm', { scope, state: tr('admin.dex_state.' + state), who: admUserLabel(d.user) }))) return;
+    if (!await uiConfirm(tr('admin.dex_bulk_confirm', { scope, state: tr('admin.dex_state.' + state), who: admUserLabel(d.user) }))) return;
     try {
       await admApi(admUserUrl(userId) + '/dex/bulk', admSend('POST', { state, generation: gen ? Number(gen) : null }));
       admSectionDex(box, d);
@@ -2629,10 +2678,10 @@ async function admSectionAchievements(box, d) {
     btn.onclick = () => { adminState.achGroup = btn.dataset.group; pageState['admin:achievements:' + userId] = 0; admSectionAchievements(box, d); };
   });
   box.querySelector('#admAchQ').oninput = e => { adminState.achQuery = e.target.value; pageState['admin:achievements:' + userId] = 0; drawList(); };
-  const bulk = unlocked => {
+  const bulk = async unlocked => {
     const keys = listed().map(a => a.key);
     if (!keys.length) return;
-    if (!confirm(tr(unlocked ? 'admin.achievements_grant_confirm' : 'admin.achievements_revoke_confirm',
+    if (!await uiConfirm(tr(unlocked ? 'admin.achievements_grant_confirm' : 'admin.achievements_revoke_confirm',
       { count: keys.length, who: admUserLabel(d.user) }))) return;
     send('/achievements/bulk', { keys, unlocked, reward: reward() });
   };
@@ -2743,14 +2792,14 @@ async function admSectionRaw(box, d) {
       editor.classList.remove('hidden');
       editor.querySelector('.admRawSave').onclick = async () => {
         const values = collect(editor, row);
-        if (!Object.keys(values).length) { alert(tr('admin.settings_nothing_changed')); return; }
+        if (!Object.keys(values).length) { uiAlert(tr('admin.settings_nothing_changed')); return; }
         try { await admApi(url, admSend('PATCH', { values })); redraw(); }
         catch (e) { admFail(e); }
       };
     };
     const del = card.querySelector('.admRawDelete');
     if (del) del.onclick = async () => {
-      if (!confirm(tr('admin.raw_delete_confirm', { table: adminState.rawTable, row: row._rowid, who: admUserLabel(d.user) }))) return;
+      if (!await uiConfirm(tr('admin.raw_delete_confirm', { table: adminState.rawTable, row: row._rowid, who: admUserLabel(d.user) }))) return;
       try { await admApi(url, { method: 'DELETE' }); redraw(); }
       catch (e) { admFail(e); }
     };
@@ -2811,7 +2860,7 @@ function admWirePokemonCards(scope, d) {
       catch (e) { admFail(e); }
     };
     card.querySelector('.admRelease').onclick = async () => {
-      if (!confirm(tr('admin.release_confirm', { title, level: p.level, who }))) return;
+      if (!await uiConfirm(tr('admin.release_confirm', { title, level: p.level, who }))) return;
       try { await admApi(url, { method: 'DELETE' }); reload(); }
       catch (e) { admFail(e); }
     };
@@ -3089,7 +3138,7 @@ async function renderShop() {
           <div class="muted">${tr('shop.in_bag', { count: it.owned })}${it.usable_count
             ? ' · ' + tr('shop.usable_count', { count: it.usable_count }) : ''}</div>
         </div>
-        <input type="number" class="shopQty" min="1" max="99" value="1" style="width:70px" aria-label="${tr('shop.quantity')}">
+        <input type="number" class="shopQty" min="1" max="999" value="1" style="width:70px" aria-label="${tr('shop.quantity')}">
         <button class="action shopBuy" ${it.price > shop.money ? 'disabled' : ''}>${tr('shop.buy')}</button>
         <span class="log shopResult"></span>
       </div>`).join('')}
@@ -3425,7 +3474,7 @@ async function refightTrainerBattle(trainerId, ownedId, teamIds) {
       body: trainerId === 'training' ? undefined : JSON.stringify({ team: teamIds }) });
     battleMenu = 'moves';
     showBattle(v);
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
 }
 
 // Training (app/training.py): sparring with one Pokémon from its summary -
@@ -3441,7 +3490,7 @@ async function startTraining(ownedId, mode) {
     closePokemon();
     battleMenu = 'moves';
     showBattle(v);
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
 }
 
 // Spielerkaempfe (kind 'pvp', app/pvp.py) laufen ueber dieselbe Engine wie
@@ -3540,7 +3589,7 @@ async function openBattleConfirm(startFn, opponentFn, persistParty = true) {
     $('#battleOverlay').classList.remove('hidden');
     document.body.classList.add('no-scroll');
     renderBattleConfirm();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
 }
 
 function closeBattleConfirm() {
@@ -3641,15 +3690,15 @@ function renderBattleConfirm() {
       try {
         await api(`/api/pokemon/${id}/use-item`, { method: 'POST', body: JSON.stringify({ item_key: select.value }) });
         await refreshBattleConfirmHealing();
-      } catch (e) { alert(e.message); btn.disabled = false; }
+      } catch (e) { uiAlert(e.message); btn.disabled = false; }
     };
   });
   if ($('#bConfirmAutoHeal')) $('#bConfirmAutoHeal').onclick = async () => {
     try {
       const r = await api('/api/team/auto-heal', { method: 'POST' });
-      alert(r.message);
+      uiAlert(r.message);
       await refreshBattleConfirmHealing();
-    } catch (e) { alert(e.message); }
+    } catch (e) { uiAlert(e.message); }
   };
   $('#bConfirmCancel').onclick = closeBattleConfirm;
   $('#bConfirmFight').onclick = runBattleConfirmStart;
@@ -3744,7 +3793,7 @@ async function runBattleConfirmStart() {
     battleConfirmStart = null;
     battleMenu = 'moves';
     showBattle(v);
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
   battleBusy = false;
 }
 
@@ -4052,10 +4101,10 @@ function renderBattle() {
   on('.bMega', () => battleAct({ action: 'mega' }));
   on('.bMove', btn => battleAct({ action: 'move', move: btn.dataset.move }));
   on('.bSwitch', btn => battleAct({ action: 'switch', target: Number(btn.dataset.target) }));
-  on('.bBall', btn => {
+  on('.bBall', async btn => {
     const ball = btn.dataset.ball;
     const held = ((v.balls || []).find(b => b.key === ball) || {}).count || 0;
-    if (!confirmMasterBall(ball, w.name, held)) return;
+    if (!await confirmMasterBall(ball, w.name, held)) return;
     battleAct({ action: 'ball', ball });
   });
   const medTarget = el.querySelector('#bMedTarget');
@@ -4404,7 +4453,7 @@ function pickTradePokemon(title) {
     overlay.innerHTML = `<div class="pokemon-detail muted">${tr('team.loading_pokemon')}</div>`;
     let list;
     try { list = (await api('/api/trades/tradable')).pokemon; }
-    catch (e) { finish(null); alert(e.message); return; }
+    catch (e) { finish(null); uiAlert(e.message); return; }
     pageState['trade:pick'] = 0;
     overlay.innerHTML = `<div class="pokemon-detail">
       <div class="row"><h3 class="grow" style="margin:0">${esc(title)}</h3>
@@ -4507,16 +4556,16 @@ async function renderTrade() {
       const chosen = await pickTradePokemon(tr('trade.picker_offer'));
       if (chosen) {
         renderTrade.draft = { partner: partnerSel.value, pokemon: chosen };
-        renderTrade().catch(e => alert(e.message));
+        renderTrade().catch(e => uiAlert(e.message));
       }
     };
     $('#tradeSend').onclick = async () => {
       const partner = partnerSel.value;
-      if (!partner) { alert(tr('trade.choose_partner')); return; }
+      if (!partner) { uiAlert(tr('trade.choose_partner')); return; }
       try {
         await api('/api/trades', { method: 'POST', body: JSON.stringify({ partner_id: partner, pokemon_id: renderTrade.draft.pokemon.id }) });
         renderTrade.draft = null;
-      } catch (e) { alert(e.message); }
+      } catch (e) { uiAlert(e.message); }
       refreshTradeBadge();
       render('trade');
     };
@@ -4527,7 +4576,7 @@ async function renderTrade() {
   const act = (selector, handler) => el.querySelectorAll(selector).forEach(btn => {
     btn.onclick = async () => {
       const trade = byId.get(btn.closest('[data-id]').dataset.id);
-      try { await handler(trade); } catch (e) { alert(e.message); }
+      try { await handler(trade); } catch (e) { uiAlert(e.message); }
       refreshTradeBadge();
       refreshMoney();
       render('trade');
@@ -4540,9 +4589,9 @@ async function renderTrade() {
   });
   act('.tradeAccept', async trade => {
     const name = p => p.nickname || speciesName(p.species);
-    if (!confirm(tr('trade.accept_confirm', { give: name(trade.initiator_pokemon), get: name(trade.partner_pokemon) }))) return;
+    if (!await uiConfirm(tr('trade.accept_confirm', { give: name(trade.initiator_pokemon), get: name(trade.partner_pokemon) }))) return;
     await post(trade, 'accept');
-    alert(tr('trade.completed_message'));
+    uiAlert(tr('trade.completed_message'));
   });
   act('.tradeDecline', trade => post(trade, 'decline'));
   act('.tradeCancel', trade => post(trade, 'cancel'));
@@ -4994,8 +5043,8 @@ const genLabel = g => tr('gen.' + g);
 const regionLabel = key => tr('region.' + key) || key;
 // Same sort/filter state shape as the box (boxView) - species have no
 // favorite/locked/level of their own, so boxFilterControlsHtml hides those
-// controls here; `status` (seen/caught/undiscovered) is the one filter the
-// box doesn't need and the Pokédex adds via opts.status.
+// controls here; `status` (caught/seen/undiscovered/not-in-team-or-box) is
+// a filter the box doesn't need and the Pokédex adds via opts.status.
 const dexFilter = { query: '', sort: '', type: '', generation: '', status: '', shiny: false,
   minLevel: '', stage: '', rarity: '', invert: false };
 
@@ -5448,7 +5497,7 @@ async function openSpeciesDex(speciesId) {
           body: JSON.stringify({ sprite_style: e.target.value ? +e.target.value : null }) });
         speciesSpriteStyles = res.species_sprite_styles || {};
         showSprite();
-      } catch (err) { alert(err.message); }
+      } catch (err) { uiAlert(err.message); }
     };
     const toggle = $('#speciesShinyToggle');
     if (toggle) {
@@ -5627,21 +5676,21 @@ async function openPokemon(ownedId, notice) {
     const pokeAbilityPill = overlay.querySelector('.ability-pill');
     if (pokeAbilityPill) pokeAbilityPill.onclick = event => { event.stopPropagation(); openAbilityInfo(p.ability_info); };
     const afterTeamChange = async fn => {
-      try { await fn(); openPokemon(ownedId); } catch (e) { alert(e.message); }
+      try { await fn(); openPokemon(ownedId); } catch (e) { uiAlert(e.message); }
     };
     if ($('#pokeToBox')) $('#pokeToBox').onclick = () => afterTeamChange(() =>
       api('/api/team/party', { method: 'PUT', body: JSON.stringify({ order: partyIds.filter(x => x !== ownedId) }) }));
     if ($('#pokeToTeam')) $('#pokeToTeam').onclick = () => afterTeamChange(() =>
       api('/api/team/party', { method: 'PUT', body: JSON.stringify({ order: [...partyIds, ownedId] }) }));
     if ($('#pokeRelease')) $('#pokeRelease').onclick = async () => {
-      if (!confirm(tr('team.release_confirm', { name: p.name, level: p.level }))) return;
+      if (!await uiConfirm(tr('team.release_confirm', { name: p.name, level: p.level }))) return;
       try {
         const r = await api(`/api/team/${encodeURIComponent(ownedId)}`, { method: 'DELETE' });
         let msg = tr('team.released', { name: r.name });
         if (r.rare_candy_awarded) msg += ' ' + tr('team.release_candy_reward', { count: r.rare_candy_awarded });
-        alert(msg);
+        uiAlert(msg);
         closePokemon();
-      } catch (e) { alert(e.message); }
+      } catch (e) { uiAlert(e.message); }
     };
     if ($('#pokeTraining')) $('#pokeTraining').onclick = () => startTraining(ownedId, $('#pokeTrainingMode').value);
     $('#pokeBuddy').onclick = async () => {
@@ -5666,7 +5715,7 @@ async function openPokemon(ownedId, notice) {
       btn.onclick = async () => {
         const target = (p.level_evolutions || []).find(e => String(e.to_species_id) === btn.dataset.to);
         const toName = target ? evoTargetName(target) : '?';
-        if (!confirm(tr('evolution.confirm', { name: p.name, to: toName }))) return;
+        if (!await uiConfirm(tr('evolution.confirm', { name: p.name, to: toName }))) return;
         evoButtons().forEach(b => { b.disabled = true; });
         try {
           const r = await api(`/api/team/${encodeURIComponent(ownedId)}/evolve`, {
@@ -5686,7 +5735,7 @@ async function openPokemon(ownedId, notice) {
         const target = (p.item_evolutions || []).find(e =>
           e.item_key === btn.dataset.item && String(e.to_species_id) === btn.dataset.to);
         const toName = target ? evoTargetName(target) : '?';
-        if (!confirm(tr('evolution.confirm', { name: p.name, to: toName }))) return;
+        if (!await uiConfirm(tr('evolution.confirm', { name: p.name, to: toName }))) return;
         evoButtons().forEach(b => { b.disabled = true; });
         try {
           await api(`/api/pokemon/${encodeURIComponent(ownedId)}/use-item`, {
@@ -5991,7 +6040,9 @@ function boxSorted(box, view = boxView) {
 // only where their opt is on - the Pokédex has none of those (a species isn't
 // favorited/locked/evolved, only a specific owned Pokémon is), and reads
 // `shiny`/`minLevel` off `shiny_caught`/`max_level` instead of an owned
-// instance's own `shiny`/`level`.
+// instance's own `shiny`/`level`; the 'not_owned' status option reads
+// `owned_now`, true while any copy of the species currently sits in the
+// player's team or box (see GET /api/pokedex).
 function boxFilterMatches(p, view) {
   const sp = p.species || p;
   const q = (view.query || '').trim().toLocaleLowerCase().replace(/^#/, '');
@@ -6007,15 +6058,17 @@ function boxFilterMatches(p, view) {
     && (!view.rarity || sp.rarity_tier === view.rarity)
     && (!view.canEvolve || boxCanEvolve(p))
     && (!view.status || (view.status === 'caught' ? p.caught_count
-        : view.status === 'seen' ? (p.seen_count && !p.caught_count) : !p.seen_count));
+        : view.status === 'seen' ? (p.seen_count && !p.caught_count)
+        : view.status === 'not_owned' ? !p.owned_now : !p.seen_count));
   return view.invert ? !match : match;
 }
 // Sort + filter controls; element ids are `prefix` + Sort/FType/FGen/...
 // (wired by wireBoxFilters). opts.search adds the name search field,
 // opts.evolve the "can evolve" checkbox, opts.locked the "locked only" one,
-// opts.status the Pokédex-only seen/caught select. opts.favorite/opts.minLevel
-// default to on (the box, trade and battle pickers all use them) and are
-// turned off by the Pokédex, which has no owned instance to read them from.
+// opts.status the Pokédex-only caught/seen/undiscovered/not-owned select.
+// opts.favorite/opts.minLevel default to on (the box, trade and battle
+// pickers all use them) and are turned off by the Pokédex, which has no
+// owned instance to read them from.
 function boxFilterControlsHtml(view, prefix, opts = {}) {
   return `${opts.search ? `<input type="search" class="grow" id="${prefix}FQuery" placeholder="${esc(tr('trade.search_placeholder'))}" value="${esc(view.query || '')}">` : ''}
       <select id="${prefix}Sort"><option value="">${tr('team.box_sort_default')}</option>${Object.entries(boxSortLabels())
@@ -6029,6 +6082,7 @@ function boxFilterControlsHtml(view, prefix, opts = {}) {
         <option value="caught" ${view.status === 'caught' ? 'selected' : ''}>${tr('pokedex.status_caught')}</option>
         <option value="seen" ${view.status === 'seen' ? 'selected' : ''}>${tr('pokedex.status_seen_only')}</option>
         <option value="unseen" ${view.status === 'unseen' ? 'selected' : ''}>${tr('pokedex.status_undiscovered')}</option>
+        <option value="not_owned" ${view.status === 'not_owned' ? 'selected' : ''}>${tr('pokedex.not_in_box_only')}</option>
       </select>` : ''}
       <label><input type="checkbox" id="${prefix}FShiny" ${view.shiny ? 'checked' : ''}> ${tr('pokedex.shiny_only')}</label>
       ${opts.favorite !== false ? `<label><input type="checkbox" id="${prefix}FFavorite" ${view.favorite ? 'checked' : ''}> ${tr('team.favorites_only')}</label>` : ''}
@@ -6142,11 +6196,11 @@ async function renderTeam() {
     <div id="teamViewBody"></div>
   `;
   $('#teamHeal').onclick = async () => {
-    try { await api('/api/team/heal', { method: 'POST' }); } catch (e) { alert(e.message); }
+    try { await api('/api/team/heal', { method: 'POST' }); } catch (e) { uiAlert(e.message); }
     render('team');
   };
   if ($('#teamAutoHeal')) $('#teamAutoHeal').onclick = async () => {
-    try { alert((await api('/api/team/auto-heal', { method: 'POST' })).message); } catch (e) { alert(e.message); }
+    try { uiAlert((await api('/api/team/auto-heal', { method: 'POST' })).message); } catch (e) { uiAlert(e.message); }
     refreshMoney();
     render('team');
   };
@@ -6196,7 +6250,7 @@ async function renderTeam() {
       refreshBoxSelectionBar(t.box);
       $('#boxEvolveSel').onclick = async () => {
         const ids = t.box.filter(p => boxSelection.has(p.id) && boxBulkEvolvable(p)).map(p => p.id);
-        if (!ids.length || !confirm(tr('team.box_evolve_selected_confirm', { count: ids.length }))) return;
+        if (!ids.length || !await uiConfirm(tr('team.box_evolve_selected_confirm', { count: ids.length }))) return;
         try {
           const r = await api('/api/team/evolve-many', { method: 'POST', body: JSON.stringify({ ids }) });
           let msg = tr('team.box_evolved_many', { count: r.evolved.length });
@@ -6204,8 +6258,8 @@ async function renderTeam() {
           r.evolved.filter(e => e.shedinja).forEach(e => {
             msg += ' ' + tr('evolution.shedinja_appeared', { name: e.shedinja.name });
           });
-          alert(msg);
-        } catch (e) { alert(e.message); }
+          uiAlert(msg);
+        } catch (e) { uiAlert(e.message); }
         boxSelection.clear();
         renderTeam();
       };
@@ -6215,22 +6269,22 @@ async function renderTeam() {
         if (!ids.length) return;
         try {
           await api('/api/team/lock-many', { method: 'POST', body: JSON.stringify({ ids, locked }) });
-        } catch (e) { alert(e.message); }
+        } catch (e) { uiAlert(e.message); }
         renderTeam();  // keeps the selection, so lock -> release-the-rest works in one go
       };
       $('#boxLockSel').onclick = () => lockSelected(true);
       $('#boxUnlockSel').onclick = () => lockSelected(false);
       $('#boxReleaseSel').onclick = async () => {
         const ids = boxSelectedByLock(t.box).unlocked.map(p => p.id);
-        if (!ids.length || !confirm(tr('team.box_release_selected_confirm', { count: ids.length }))) return;
+        if (!ids.length || !await uiConfirm(tr('team.box_release_selected_confirm', { count: ids.length }))) return;
         try {
           const r = await api('/api/team/release', { method: 'POST', body: JSON.stringify({ ids }) });
           let msg = r.released.length === 1
             ? tr('team.released', { name: r.released[0].name })
             : tr('team.box_released_many', { count: r.released.length });
           if (r.rare_candy_awarded) msg += ' ' + tr('team.release_candy_reward', { count: r.rare_candy_awarded });
-          alert(msg);
-        } catch (e) { alert(e.message); }
+          uiAlert(msg);
+        } catch (e) { uiAlert(e.message); }
         boxSelection.clear();
         renderTeam();
       };
@@ -6265,13 +6319,13 @@ async function renderTeam() {
   const setParty = async order => {
     try {
       await api('/api/team/party', { method: 'PUT', body: JSON.stringify({ order }) });
-    } catch (e) { alert(e.message); }
+    } catch (e) { uiAlert(e.message); }
     render('team');
   };
   const setItem = async (id, item) => {
     try {
       await api(`/api/team/${encodeURIComponent(id)}/held-item`, { method: 'PUT', body: JSON.stringify({ item }) });
-    } catch (e) { alert(e.message); }
+    } catch (e) { uiAlert(e.message); }
     render('team');
   };
 
@@ -6431,7 +6485,7 @@ async function renderEggs(body, locked) {
   `;
   const rerender = () => renderTeam();
   const call = async (path, options) => {
-    try { return await api(path, options); } catch (e) { alert(e.message); return null; }
+    try { return await api(path, options); } catch (e) { uiAlert(e.message); return null; }
   };
   const move = (id, location) => call(`/api/eggs/${encodeURIComponent(id)}/location`,
     { method: 'PUT', body: JSON.stringify({ location }) }).then(rerender);
@@ -6466,7 +6520,7 @@ async function renderEggs(body, locked) {
   if ($('#daycareClear')) $('#daycareClear').onclick = () => call('/api/daycare', { method: 'DELETE' }).then(rerender);
   if ($('#daycareCollect')) $('#daycareCollect').onclick = async () => {
     const r = await call('/api/daycare/collect', { method: 'POST' });
-    if (r) alert(r.egg.location === 'party' ? tr('eggs.collected_party') : tr('eggs.collected_box'));
+    if (r) uiAlert(r.egg.location === 'party' ? tr('eggs.collected_party') : tr('eggs.collected_box'));
     rerender();
   };
   // Schritt-Sensor: derselbe wie beim Buddy (PUT /api/buddy/sensor).
@@ -6488,7 +6542,7 @@ async function openStepSensorPicker(box, current, onSaved) {
       try {
         await api('/api/buddy/sensor', { method: 'PUT', body: JSON.stringify({ entity_id: $('#stepSensorSel').value || null }) });
         onSaved();
-      } catch (e) { alert(e.message); }
+      } catch (e) { uiAlert(e.message); }
     };
   } catch (e) { box.innerHTML = `<span class="muted">${esc(e.message)}</span>`; }
 }
@@ -6500,7 +6554,7 @@ async function toggleFavorite(ownedId, favorite) {
     await api(`/api/team/${encodeURIComponent(ownedId)}/favorite`, {
       method: 'PUT', body: JSON.stringify({ favorite }),
     });
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
 }
 
 // Sperr-Markierung eines eigenen Pokemon setzen/entfernen (Team oder Box) -
@@ -6511,7 +6565,7 @@ async function toggleLocked(ownedId, locked) {
     await api(`/api/team/${encodeURIComponent(ownedId)}/locked`, {
       method: 'PUT', body: JSON.stringify({ locked }),
     });
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiAlert(e.message); }
 }
 
 // Buddy setzen (pokemonId) oder entfernen (null); fragt nach, wenn dabei
@@ -6519,14 +6573,14 @@ async function toggleLocked(ownedId, locked) {
 async function setBuddy(pokemonId, info) {
   const current = info.pokemon;
   if (current && current.id !== pokemonId) {
-    if (pokemonId === null && !confirm(tr('buddy.remove_confirm', { name: current.name }))) return false;
-    if (pokemonId !== null && info.steps > 0 && !confirm(tr('buddy.change_hint'))) return false;
+    if (pokemonId === null && !await uiConfirm(tr('buddy.remove_confirm', { name: current.name }))) return false;
+    if (pokemonId !== null && info.steps > 0 && !await uiConfirm(tr('buddy.change_hint'))) return false;
   }
   try {
     const r = await api('/api/buddy', { method: 'PUT', body: JSON.stringify({ pokemon_id: pokemonId }) });
-    if (!r.pushed) alert(tr('buddy.not_pushed'));
+    if (!r.pushed) uiAlert(tr('buddy.not_pushed'));
     return true;
-  } catch (e) { alert(e.message); return false; }
+  } catch (e) { uiAlert(e.message); return false; }
 }
 
 async function renderBuddy(body, t) {
@@ -6658,7 +6712,7 @@ async function showStarterGate() {
         });
         startApp();
       } catch (e) {
-        alert(e.message);
+        uiAlert(e.message);
         gate.querySelectorAll('.starterPick').forEach(b => b.disabled = false);
       }
     };
@@ -6765,7 +6819,7 @@ async function showTutorialStarter() {
         });
         showTutorialCatching();
       } catch (e) {
-        alert(e.message);
+        uiAlert(e.message);
         gate.querySelectorAll('.tutorialStarterPick').forEach(b => b.disabled = false);
       }
     };
