@@ -79,7 +79,7 @@ def _token() -> str:
 
 async def _fetch_ha_users() -> list[dict[str, Any]]:
     """Alle HA-Nutzer ueber `config/auth/list` (erfordert Admin-Token)."""
-    # `websockets` kommt mit uvicorn[standard] - keine Zusatzabhaengigkeit.
+    # `websockets` is pinned in requirements.txt (also used by uvicorn).
     from websockets.asyncio.client import connect
 
     async def run() -> list[dict[str, Any]]:

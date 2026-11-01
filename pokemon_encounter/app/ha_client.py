@@ -153,7 +153,7 @@ class HomeAssistantClient:
         return self.base_url + "/websocket"
 
     async def _ws_command(self, command: str) -> Any:
-        # `websockets` kommt mit uvicorn[standard] - keine Zusatz-Abhaengigkeit.
+        # `websockets` is pinned in requirements.txt (also used by uvicorn).
         try:
             from websockets.asyncio.client import connect
         except ImportError:  # aeltere websockets-Versionen
