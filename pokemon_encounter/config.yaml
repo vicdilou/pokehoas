@@ -5,8 +5,8 @@
 # SQLite - not here. This file only holds things that must be fixed before the
 # first start, plus the choice of which entity CATEGORIES automatically become
 # triggers (trigger_categories & co.).
-name: PokeHOAS
-version: "1.3-beta"
+name: PokeHOAS DEV
+version: "1.3-beta-dev1"
 slug: pokemon_encounter
 description: Random Pokémon encounters triggered by Home Assistant events. Battle and catch them in a built-in web app.
 url: https://github.com/nedzad-winter/pokehoas
