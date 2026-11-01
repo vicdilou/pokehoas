@@ -581,3 +581,29 @@ def species_names(lang: str) -> dict[str, Any]:
     if lang == "en" or lang not in seed.NAME_LANGS:
         return {"names": {}, "by_en": {}}
     return db.species_name_tables(lang)
+
+
+_NAME_TABLES: dict[str, Any] | None = None
+
+
+def _name_tables() -> dict[str, Any]:
+    """names_i18n.json (see scripts/build_name_translations.py), loaded once."""
+    global _NAME_TABLES
+    if _NAME_TABLES is None:
+        try:
+            _NAME_TABLES = json.loads((seed.DATA_DIR / "names_i18n.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _NAME_TABLES = {}
+    return _NAME_TABLES
+
+
+@router.get("/name-tables/{lang}")
+def name_tables(lang: str) -> dict[str, Any]:
+    """Ability, move and type names in `lang`, {kind: {key: name}}. English and German
+    keep their catalog names, and PokeAPI has no Polish, so those return nothing."""
+    empty: dict[str, Any] = {"abilities": {}, "moves": {}, "types": {}}
+    if lang not in ("es", "fr", "it", "ja", "ko"):
+        return empty
+    tables = _name_tables()
+    return {kind: {key: names[lang] for key, names in tables.get(kind, {}).items() if lang in names}
+            for kind in empty}
