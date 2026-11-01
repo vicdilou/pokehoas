@@ -607,3 +607,23 @@ def name_tables(lang: str) -> dict[str, Any]:
     tables = _name_tables()
     return {kind: {key: names[lang] for key, names in tables.get(kind, {}).items() if lang in names}
             for kind in empty}
+
+
+_ABILITY_DESCRIPTIONS: dict[str, Any] | None = None
+
+
+@router.get("/ability-descriptions/{lang}")
+def ability_descriptions(lang: str) -> dict[str, str]:
+    """Official ability descriptions in `lang` ({key: text}), from
+    ability_descriptions_i18n.json (see scripts/build_ability_descriptions.py). English and
+    German stay in abilities.json; PokeAPI has no Polish, so those return nothing."""
+    global _ABILITY_DESCRIPTIONS
+    if _ABILITY_DESCRIPTIONS is None:
+        try:
+            _ABILITY_DESCRIPTIONS = json.loads(
+                (seed.DATA_DIR / "ability_descriptions_i18n.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _ABILITY_DESCRIPTIONS = {}
+    if lang not in ("es", "fr", "it", "ja", "ko"):
+        return {}
+    return {key: texts[lang] for key, texts in _ABILITY_DESCRIPTIONS.items() if lang in texts}
