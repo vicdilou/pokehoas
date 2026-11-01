@@ -1,6 +1,8 @@
 """Tests fuer das owned_now-Flag im Pokedex (/api/pokedex): markiert Arten,
 von denen der Spieler aktuell mindestens ein Exemplar im Team oder in der Box
-hat - Grundlage fuer das kleine Pokeball-Icon im Dex-Grid (www/index.html).
+hat - Grundlage fuer das kleine Pokeball-Icon im Dex-Grid sowie die
+"not in box"-Option im Status-Dropdown der Dex-Sortierung (beide
+www/index.html).
 
 Aufruf:  python3 tests/test_pokedex_owned.py
 """
@@ -66,6 +68,15 @@ db.execute("DELETE FROM owned_pokemon WHERE id = ?", (owned_id,))
 dex_after = team_api.get_pokedex(current_user=alice)
 by_id_after = {row["id"]: row for row in dex_after["entries"]}
 check("released species no longer owned_now", by_id_after[owned_species]["owned_now"] is False)
+
+# The Pokédex filter bar's status dropdown (boxFilterControlsHtml /
+# boxFilterMatches / wireBoxFilters, www/index.html) has a "not in box"
+# option next to caught/seen/undiscovered that reads this same owned_now
+# flag - a structural check that the wiring is actually in place, since the
+# frontend has no test runner of its own.
+html = (ROOT / "pokemon_encounter" / "www" / "index.html").read_text(encoding="utf-8")
+check("status select offers a not_owned option", 'value="not_owned"' in html and "pokedex.not_in_box_only" in html)
+check("boxFilterMatches filters on owned_now for not_owned status", "view.status === 'not_owned' ? !p.owned_now" in html)
 
 if failures:
     print(f"\n{len(failures)} FAIL(s): {failures}")

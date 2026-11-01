@@ -61,8 +61,11 @@ TRAINER: dict[str, Any] = {
 
 
 def unlocked(user_id: str) -> bool:
+    """Same achievement flag `share_all_exp` uses for its own milestone - not
+    the raw count, so admin-granted/-revoked achievements (api/admin.py) take
+    effect immediately instead of only following actual level-100 progress."""
     return (god_mode.active(user_id)
-            or achievements.level100_count(user_id) >= UNLOCK_COUNT)
+            or achievements.LEVEL100_101ST in achievements.unlocked(user_id))
 
 
 def overview(user_id: str) -> dict[str, Any]:

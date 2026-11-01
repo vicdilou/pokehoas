@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -242,7 +242,11 @@ trading.delete("bob", trade_id)
 check("Trade row is deleted once both removed it", db.query_one("SELECT 1 FROM trade WHERE id = ?", (trade_id,)) is None)
 
 check("Purge keeps finished trades of today", trading.purge_closed() == 0 and status_of(t1) == "declined")
-yesterday = (now - timedelta(days=1)).isoformat()
+# Anchored at noon, not `now`'s own time of day: close to a DST transition, a
+# fixed-offset 24h subtraction can land on the wrong calendar date (e.g. the
+# fall-back day is 25 hours long), while noon is far enough from midnight to
+# absorb a stale one-hour UTC offset either way.
+yesterday = datetime.combine(now.date() - timedelta(days=1), time(12, 0), tzinfo=now.tzinfo).isoformat()
 db.execute("UPDATE trade SET closed_at = ? WHERE id IN (?, ?)", (yesterday, t1, t2))
 open_id = trading.request_trade("bob", "alice", a_pika)["id"]  # a_pika belongs to Bob after the first trade
 purged = trading.purge_closed()

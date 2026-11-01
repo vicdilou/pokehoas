@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3-beta
 
 - PokeHOAS now also runs **without Supervisor** (Home Assistant Container): a standalone
   Docker image (`ghcr.io/nedzad-winter/pokehoas`) configured with environment variables,
@@ -10,6 +10,15 @@
   backup**). The standalone image additionally keeps daily snapshots.
 - Security: the identity source is now an explicit auth mode. Ingress headers are only
   trusted in the add-on, and the no-login dev mode is never picked by accident.
+- Pokédex: the status filter has a new option **Not in team or box**, which lists the species
+  you don't own a copy of right now. Handy for spotting gaps in the living Pokédex.
+- Poké Mart: you can buy up to 999 of an item at once (was 99).
+- Fix: confirmations and messages now use the app's own dialog instead of the browser's.
+  A browser that blocks pop-ups ("don't let this site prompt you again") or the Home
+  Assistant companion app could suppress them, so buttons such as **Accept trade**,
+  release or evolve silently did nothing.
+- Fix: the Training card now follows the **Dojo Master** achievement, so an achievement
+  granted by an admin unlocks it right away.
 
 ## 1.2-beta
 
