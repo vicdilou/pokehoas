@@ -4,9 +4,6 @@
 
 # PokeHOAS – Pokémon for Home Assistant
 
-[![Open your Home Assistant instance and show the add add-on repository dialog with this repository pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fnedzad-winter%2Fpokehoas)
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/nedzadwinter)
-
 Your smart home is the tall grass. Every event in Home Assistant – a motion sensor, a
 door, a light switch, a person arriving at a zone – can spawn a wild Pokémon. Each
 Home Assistant user gets their **own queue, team, Pokédex and bag** and handles the
